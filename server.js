@@ -1,47 +1,33 @@
 const express = require('express');
+const serverless = require('serverless-http');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const fs = require('fs');
 const path = require('path');
 const bodyParser = require('body-parser');
 
 const app = express();
+const router = express.Router();
 app.use(bodyParser.json());
-app.use(express.static('public'));
 
-const SECRET_KEY = 'your-secret-key';  // Use environment variables for real apps
-const users = [{ username: 'admin', password: bcrypt.hashSync('adminpassword', 8) }];  // Example user
+const SECRET_KEY = 'your-secret-key';
 
 let blogContent = {
     imageUrl: '/default-image.jpg',
     text: 'This is my blog description. Stay tuned for updates!'
 };
 
-// File upload configuration
-const storage = multer.diskStorage({
-    destination: 'public/uploads/',
-    filename: (req, file, cb) => {
-        cb(null, 'blog-image' + path.extname(file.originalname));
-    }
-});
+// File upload configuration for multer
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// Login route
-app.post('/login', (req, res) => {
-    const { username, password } = req.body;
-    const user = users.find(u => u.username === username);
-
-    if (!user || !bcrypt.compareSync(password, user.password)) {
-        return res.status(401).json({ message: 'Authentication failed' });
-    }
-
-    const token = jwt.sign({ username: user.username }, SECRET_KEY, { expiresIn: '1h' });
-    res.json({ token });
+// Serve uploads
+router.get('/get-blog', (req, res) => {
+    res.json(blogContent);
 });
 
-// Protected route to update the blog content
-app.post('/update-blog', upload.single('image'), (req, res) => {
+// Authentication and updating blog (with token verification)
+router.post('/update-blog', upload.single('image'), (req, res) => {
     const token = req.headers['authorization'];
 
     if (!token) {
@@ -53,8 +39,10 @@ app.post('/update-blog', upload.single('image'), (req, res) => {
             return res.status(401).json({ message: 'Failed to authenticate token' });
         }
 
+        // Update image and text
         if (req.file) {
-            blogContent.imageUrl = `/uploads/${req.file.filename}`;
+            const image = req.file.buffer.toString('base64');
+            blogContent.imageUrl = `data:image/jpeg;base64,${image}`;
         }
 
         if (req.body.text) {
@@ -65,15 +53,7 @@ app.post('/update-blog', upload.single('image'), (req, res) => {
     });
 });
 
-// Public route to fetch blog content
-app.get('/get-blog', (req, res) => {
-    res.json(blogContent);
-});
+app.use('/.netlify/functions/server', router);
 
-// Serve the uploaded images
-app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
-
-// Start the server
-app.listen(3000, () => {
-    console.log('Server running on port 3000');
-});
+// Export for Netlify Function
+module.exports.handler = serverless(app);
